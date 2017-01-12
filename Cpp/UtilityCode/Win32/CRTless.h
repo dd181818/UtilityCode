@@ -4,43 +4,93 @@
 //
 
 #include <cstdarg>
+#include <type_traits>
+#include <utility>
 #include <Windows.h>
 
-#define CRTLESS_PRINTF_BUFFER_SIZE 512
-#define CRTLESS_PRINTF_TO_CONSOLE 1
-#define CRTLESS_PRINTF_TO_DEBUG 0
-#define CRTLESS_ASSERT(x) { if(!(x)) CRTless::_Assert(#x, __FILE__, __LINE__); }
+#include "CRTless_runtime.h"
 
 namespace CRTless {
-inline void _Assert(const char* exprString, const char* file, int line)
+///////////////////////////////////////////////////////////////////////////////
+// Multithreaded named pipe server
+class NamedPipeServerMT
 {
-	__debugbreak();
-}
+public:
+	const size_t kBufSize = 4096;
 
-inline int Printf(const char* fmt, ...)
-{
-	va_list argList;
-	va_start(argList, fmt);
-
-	char str[CRTLESS_PRINTF_BUFFER_SIZE];
-	int outLen = wvsprintfA(str, fmt, argList);
-
-#if CRTLESS_PRINTF_TO_CONSOLE
-	HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
-	CRTLESS_ASSERT(hStdOut != INVALID_HANDLE_VALUE);
-	DWORD bytesWritten;
-	if (!WriteConsoleA(hStdOut, str, static_cast<DWORD>(outLen),
-					   &bytesWritten, nullptr))
+	struct Listener
 	{
-		CRTLESS_ASSERT(0);
+		NamedPipeServerMT* server = nullptr;
+		Listener* next = nullptr;
+		HANDLE hPipe = INVALID_HANDLE_VALUE;
+		HANDLE hThread = INVALID_HANDLE_VALUE;
+	};
+
+public:
+	NamedPipeServerMT(const string_view& pipeName)
+		: m_PipeName(pipeName)
+	{
 	}
-#endif
 
-#if CRTLESS_PRINTF_TO_DEBUG
-	OutputDebugStringA(str);
-#endif
+	void Run()
+	{
+		while (true)
+		{
+			HANDLE hPipe = CreateNamedPipeA(
+				m_PipeName.c_str(),
+				PIPE_ACCESS_DUPLEX,
+				PIPE_TYPE_MESSAGE |
+				PIPE_READMODE_MESSAGE |
+				PIPE_WAIT,
+				PIPE_UNLIMITED_INSTANCES,
+				static_cast<DWORD>(kBufSize),
+				static_cast<DWORD>(kBufSize),
+				0,
+				nullptr);
 
-	va_end(argList);
-	return outLen;
-}
+			CRTLESS_ASSERT(hPipe != INVALID_HANDLE_VALUE);
+
+			bool connected = ConnectNamedPipe(hPipe, nullptr) ?
+				true : (GetLastError() == ERROR_PIPE_CONNECTED);
+
+			if (!connected)
+			{
+				CloseHandle(hPipe);
+				continue;
+			}
+
+			// Create and link a new listener
+			auto listener = New<Listener>();
+			listener->server = this;
+			listener->next = m_ListenersHead;
+			listener->hPipe = hPipe;
+			listener->hThread = CreateThread(
+				nullptr,
+				0,
+				StaticListenerThreadEntry,
+				listener,
+				0,
+				nullptr);
+
+			m_ListenersHead = listener;
+		}
+	}
+
+private:
+	static DWORD WINAPI StaticListenerThreadEntry(void* arg)
+	{
+		auto listener = reinterpret_cast<Listener*>(arg);
+		listener->server->ListenerThreadEntry(listener);
+		return 0;
+	}
+
+	void ListenerThreadEntry(Listener* listener)
+	{
+		Printf("Listening...\n");
+	}
+
+private:
+	string m_PipeName;
+	Listener* m_ListenersHead = nullptr;
+};
 }
