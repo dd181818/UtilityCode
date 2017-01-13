@@ -3,10 +3,13 @@
 // use of the MSVC runtime, hence "CRTless".
 //
 
+#pragma warning(push)
+#pragma warning(disable : 4577)
 #include <cstdarg>
 #include <type_traits>
 #include <utility>
 #include <Windows.h>
+#pragma warning(pop)
 
 #include "CRTless_runtime.h"
 
@@ -18,12 +21,18 @@ class NamedPipeServerMT
 public:
 	const size_t kBufSize = 4096;
 
+	struct Message
+	{
+		HANDLE hPipe;
+		string request;
+		string reply;
+	};
+
 	struct Listener
 	{
 		NamedPipeServerMT* server = nullptr;
-		Listener* next = nullptr;
 		HANDLE hPipe = INVALID_HANDLE_VALUE;
-		HANDLE hThread = INVALID_HANDLE_VALUE;
+		//HANDLE hThread = INVALID_HANDLE_VALUE;
 	};
 
 public:
@@ -59,38 +68,75 @@ public:
 				continue;
 			}
 
-			// Create and link a new listener
+			// Create a new listener instance & thread.
 			auto listener = New<Listener>();
 			listener->server = this;
-			listener->next = m_ListenersHead;
 			listener->hPipe = hPipe;
-			listener->hThread = CreateThread(
-				nullptr,
-				0,
-				StaticListenerThreadEntry,
-				listener,
-				0,
-				nullptr);
-
-			m_ListenersHead = listener;
+			CreateThread(nullptr, 0, StaticListenerThreadEntry, listener, 0, nullptr);
 		}
+	}
+
+protected:
+	virtual void HandleMessage(Message& msg)
+	{
 	}
 
 private:
 	static DWORD WINAPI StaticListenerThreadEntry(void* arg)
 	{
 		auto listener = reinterpret_cast<Listener*>(arg);
-		listener->server->ListenerThreadEntry(listener);
+		listener->server->ListenerThreadEntry(*listener);
 		return 0;
 	}
 
-	void ListenerThreadEntry(Listener* listener)
+	void ListenerThreadEntry(Listener& ls)
 	{
-		Printf("Listening...\n");
+		Message msg;
+		while (1)
+		{
+			DWORD bytesRead;
+			DWORD bytesWritten;
+
+			msg.request.resize(kBufSize);
+			BOOL fSuccess = ReadFile(
+				ls.hPipe, 
+				msg.request.data(),
+				static_cast<DWORD>(msg.request.size()),
+				&bytesRead,
+				nullptr);
+
+			if (!fSuccess || bytesRead == 0)
+			{
+				if (GetLastError() == ERROR_BROKEN_PIPE)
+				{
+				}
+				else
+				{
+				}
+				break;
+			}
+
+			msg.request.resize(static_cast<size_t>(bytesRead));
+			msg.reply.clear();
+			HandleMessage(msg);
+
+			fSuccess = WriteFile(
+				ls.hPipe,
+				msg.reply.data(),
+				static_cast<DWORD>(msg.reply.size()),
+				&bytesWritten,
+				nullptr);
+
+			if (!fSuccess || msg.reply.size() != bytesWritten)
+			{
+				break;
+			}
+		}
+		Printf("connection done\n");
+		Delete<Listener>(&ls);
 	}
 
 private:
 	string m_PipeName;
-	Listener* m_ListenersHead = nullptr;
 };
 }

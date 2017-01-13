@@ -130,7 +130,62 @@ public:
 		return string_view(m_Data, m_Size);
 	}
 
+	void resize(size_t newSize)
+	{
+		Resize(newSize, 0);
+	}
+
+	void resize(size_t newSize, char ch)
+	{
+		Resize(newSize, ch);
+	}
+
+	void clear()
+	{
+		Release();
+	}
+
 private:
+	string_view Detach()
+	{
+		char* data = m_Data;
+		size_t size = m_Size;
+		m_Data = nullptr;
+		m_Size = 0;
+		return string_view(data, size);
+	}
+
+	void Resize(size_t newSize, char ch)
+	{
+		if (!m_Data)
+		{
+			AllocFilled(newSize, ch);
+			return;
+		}
+		
+		if (newSize <= m_Size)
+		{
+			m_Size = newSize;
+			m_Data[newSize] = 0;
+			return;
+		}
+
+		string_view old = Detach();
+		const size_t oldSize = old.size();
+		const char* oldData = old.data();
+
+		Alloc(newSize);
+		if (newSize > oldSize)
+		{
+			const size_t diff = newSize - oldSize;
+			MTL_memcpy(m_Data, oldData, oldSize);
+			MTL_memset(&m_Data[oldSize], ch, diff);
+		}
+
+		char* p = const_cast<char*>(oldData);
+		MTL_delete_array(p);
+	}
+
 	void Release()
 	{
 		if (m_Data)
@@ -145,20 +200,19 @@ private:
 			Release();
 		m_Size = size;
 		m_Data = MTL_new_array(char, size + 1);
+		m_Data[size] = 0;
 	}
 
 	void AllocFilled(size_t size, char ch)
 	{
 		Alloc(size);
 		MTL_memset(m_Data, ch, m_Size);
-		m_Data[m_Size] = 0;
 	}
 
 	void Assign(const char* data, size_t size)
 	{
 		Alloc(size);
 		MTL_memcpy(m_Data, data, m_Size);
-		m_Data[m_Size] = 0;
 	}
 
 private:

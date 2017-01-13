@@ -3,19 +3,26 @@
 // use of the MSVC runtime, hence "CRTless".
 //
 
+#pragma warning(push)
+#pragma warning(disable : 4577)
 #include <cstdarg>
 #include <type_traits>
 #include <utility>
 #include <Windows.h>
+#pragma warning(pop)
 
+#define CRTLESS_OVERRIDE_NEW_DELETE 1
 #define CRTLESS_PRINTF_BUFFER_SIZE 512
 #define CRTLESS_PRINTF_TO_CONSOLE 1
 #define CRTLESS_PRINTF_TO_DEBUG 0
 #define CRTLESS_ASSERT(x) { if(!(x)) CRTless::_Assert(#x, __FILE__, __LINE__); }
 
 namespace CRTless {
+inline int Printf(const char* fmt, ...);
+
 inline void _Assert(const char* exprString, const char* file, int line)
 {
+	Printf("Assert: %s (%s:%d)\n", exprString, file, line);
 	__debugbreak();
 }
 
@@ -44,6 +51,11 @@ inline int Printf(const char* fmt, ...)
 
 	va_end(argList);
 	return outLen;
+}
+
+inline void __declspec(noreturn) Exit(int code)
+{
+	ExitProcess(static_cast<UINT>(code));
 }
 
 inline void* Malloc(size_t size)
@@ -134,6 +146,53 @@ inline size_t Strlen(const char* str)
 	return static_cast<size_t>(lstrlenA(str));
 }
 }
+
+#ifdef CRTLESS_MAIN
+#if CRTLESS_OVERRIDE_NEW_DELETE
+#pragma warning(push)
+#pragma warning(disable : 4290)
+void* operator new (std::size_t size)
+{
+	return CRTless::Malloc(size);
+}
+
+void* operator new (std::size_t size, const std::nothrow_t &)
+{
+	return CRTless::Malloc(size);
+}
+
+void* operator new[](std::size_t size)
+{
+	return CRTless::Malloc(size);
+}
+
+void* operator new[](std::size_t size, const std::nothrow_t &)
+{
+	return CRTless::Malloc(size);
+}
+
+void operator delete (void* ptr)
+{
+	CRTless::Free(ptr);
+}
+
+void operator delete(void* ptr, size_t size)
+{
+	CRTless::Free(ptr);
+}
+
+void operator delete[](void* ptr)
+{
+	CRTless::Free(ptr);
+}
+
+void operator delete[](void* ptr, size_t size)
+{
+	CRTless::Free(ptr);
+}
+#pragma warning(pop)
+#endif
+#endif
 
 #pragma warning(push)
 #pragma warning(disable : 4005)
