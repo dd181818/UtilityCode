@@ -2,6 +2,14 @@
 // Mini Template Library
 //
 
+#ifndef MTL_namespace
+#error MTL_namespace must be defined
+#endif
+
+#ifndef MTL_assert
+#error MTL_assert must be defined
+#endif
+
 #ifndef MTL_memcpy
 #error MTL_memcpy must be defined
 #endif
@@ -89,20 +97,20 @@ public:
 	}
 
 	string(string&& str)
-		: m_Data(str.m_Data), m_Size(str.m_Size)
+		: m_Data(str.m_Data), m_Size(str.m_Size), 
+		m_Capacity(str.m_Capacity)
 	{
-		str.m_Data = nullptr;
-		str.m_Size = 0;
+		str.Detach();
 	}
 
 	string(size_t size, char ch)
 	{
-		AllocFilled(size, ch);
+		Resize(size, true, ch);
 	}
 
 	~string()
 	{
-		Release();
+		ReleaseBuffer();
 	}
 
 	const char* c_str() const
@@ -132,17 +140,17 @@ public:
 
 	void resize(size_t newSize)
 	{
-		Resize(newSize, 0);
+		Resize(newSize);
 	}
 
 	void resize(size_t newSize, char ch)
 	{
-		Resize(newSize, ch);
+		Resize(newSize, true, ch);
 	}
 
 	void clear()
 	{
-		Release();
+		Resize(0);
 	}
 
 private:
@@ -152,18 +160,28 @@ private:
 		size_t size = m_Size;
 		m_Data = nullptr;
 		m_Size = 0;
+		m_Capacity = 0;
 		return string_view(data, size);
 	}
 
-	void Resize(size_t newSize, char ch)
+	void Resize(size_t newSize, bool fill = false, char ch = 0)
 	{
 		if (!m_Data)
 		{
-			AllocFilled(newSize, ch);
+			MTL_assert(!m_Size && !m_Capacity);
+
+			m_Size = newSize;
+			m_Capacity = newSize;
+			m_Data = MTL_new_array(char, newSize + 1);
+			m_Data[newSize] = 0;
+			if (fill)
+			{
+				MTL_memset(m_Data, ch, m_Size);
+			}
 			return;
 		}
 		
-		if (newSize <= m_Size)
+		if (newSize <= m_Capacity)
 		{
 			m_Size = newSize;
 			m_Data[newSize] = 0;
@@ -174,50 +192,50 @@ private:
 		const size_t oldSize = old.size();
 		const char* oldData = old.data();
 
-		Alloc(newSize);
+		m_Size = newSize;
+		m_Capacity = newSize;
+		m_Data = MTL_new_array(char, newSize + 1);
+		m_Data[newSize] = 0;
+
 		if (newSize > oldSize)
 		{
 			const size_t diff = newSize - oldSize;
 			MTL_memcpy(m_Data, oldData, oldSize);
-			MTL_memset(&m_Data[oldSize], ch, diff);
+			if (fill)
+			{
+				MTL_memset(&m_Data[oldSize], ch, diff);
+			}
+		}
+		else
+		{
+			MTL_assert(0);
 		}
 
-		char* p = const_cast<char*>(oldData);
-		MTL_delete_array(p);
+		MTL_delete_array(const_cast<char*>(oldData));
 	}
 
-	void Release()
+	void ReleaseBuffer()
 	{
 		if (m_Data)
+		{
+			MTL_assert(m_Size && m_Capacity);
 			MTL_delete_array(m_Data);
+		}
 		m_Data = nullptr;
 		m_Size = 0;
-	}
-
-	void Alloc(size_t size)
-	{
-		if (m_Data)
-			Release();
-		m_Size = size;
-		m_Data = MTL_new_array(char, size + 1);
-		m_Data[size] = 0;
-	}
-
-	void AllocFilled(size_t size, char ch)
-	{
-		Alloc(size);
-		MTL_memset(m_Data, ch, m_Size);
+		m_Capacity = 0;
 	}
 
 	void Assign(const char* data, size_t size)
 	{
-		Alloc(size);
+		Resize(size);
 		MTL_memcpy(m_Data, data, m_Size);
 	}
 
 private:
 	char* m_Data = nullptr;
 	size_t m_Size = 0;
+	size_t m_Capacity = 0;
 };
 
 inline string operator + (const string& lhs, const string& rhs)

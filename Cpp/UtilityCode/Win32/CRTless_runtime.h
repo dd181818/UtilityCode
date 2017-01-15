@@ -198,6 +198,7 @@ void operator delete[](void* ptr, size_t size)
 #pragma warning(disable : 4005)
 
 #define MTL_namespace CRTless
+#define MTL_assert(expr) CRTLESS_ASSERT(expr)
 #define MTL_memcpy(dest, src, num) MemCpy(dest, src, num)
 #define MTL_memset(dest, fill, num) MemSet(dest, fill, num)
 #define MTL_strlen(s) Strlen(s)
